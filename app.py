@@ -6,135 +6,105 @@ import re
 import os
 from dotenv import load_dotenv
 
+# ======================================================
+# INIT
+# ======================================================
 load_dotenv()
 
-# ======================================================
-# CONFIG
-# ======================================================
 st.set_page_config(
-    page_title="🎁 Chá de Panela",
+    page_title="Chá de Panela",
     page_icon="🎁",
     layout="wide"
 )
 
 # ======================================================
-# CSS (FUNCIONA DE VERDADE)
-# ======================================================
-st.markdown("""
-<style>
-
-/* ================================
-   THEME VARIABLES
-================================ */
-:root {
-    --bg-main: #F6F1EE;
-    --card-bg: #FFFFFF;
-    --text-color: #2B2B2B;
-    --border-color: #E0D5D8;
-}
-
-/* DARK MODE */
-@media (prefers-color-scheme: dark) {
-    :root {
-        --bg-main: #121212;
-        --card-bg: #1E1E1E;
-        --text-color: #EDEDED;
-        --border-color: #7A263A;
-    }
-}
-
-/* ================================
-   BASE
-================================ */
-.stApp,
-[data-testid="stAppViewContainer"] {
-    background-color: var(--bg-main) !important;
-    color: var(--text-color);
-}
-
-[data-testid="stVerticalBlock"] {
-    padding: 1.5rem 2.5rem;
-}
-
-/* ================================
-   CARD
-================================ */
-.card {
-    background-color: var(--card-bg) !important;
-    color: var(--text-color) !important;
-    border-radius: 16px;
-    padding: 14px 16px;
-    margin-bottom: 12px;
-    border: 1px solid var(--border-color);
-    box-shadow: 0 6px 14px rgba(0,0,0,0.25);
-}
-
-/* JÁ ESCOLHIDO */
-.card.ja-escolhido {
-    border: 2px solid #7A263A;
-    background-color: rgba(122,38,58,0.08) !important;
-}
-
-/* ESGOTADO */
-.card.esgotado {
-    opacity: 0.45;
-}
-
-/* ================================
-   TEXT
-================================ */
-h1, h2, h3, strong {
-    color: #7A263A;
-}
-
-/* BADGE */
-.badge {
-    display: inline-block;
-    background-color: #7A263A;
-    color: #FFFFFF;
-    padding: 4px 10px;
-    border-radius: 999px;
-    font-size: 11px;
-    margin-top: 6px;
-}
-
-/* ================================
-   BUTTON
-================================ */
-button[kind="primary"] {
-    background-color: #7A263A !important;
-    color: white !important;
-    border-radius: 12px !important;
-}
-
-/* ================================
-   MOBILE
-================================ */
-@media (max-width: 900px) {
-    [data-testid="stVerticalBlock"] {
-        padding: 1rem;
-    }
-}
-
-</style>
-""", unsafe_allow_html=True)
-
-# ======================================================
-# HELPERS
+# FUNÇÕES
 # ======================================================
 def normalizar(texto: str) -> str:
     texto = unicodedata.normalize("NFD", texto)
     texto = texto.encode("ascii", "ignore").decode("utf-8")
-    texto = re.sub(r"[^a-zA-Z0-9]", "", texto)
-    return texto.lower()
+    texto = re.sub(r"[^a-zA-Z0-9 ]", "", texto)
+    return texto.lower().strip()
 
 def gerar_user_id(nome, telefone):
     if telefone:
         return f"tel_{telefone}"
-    return f"nome_{normalizar(nome)}"
+    return f"nome_{normalizar(nome).replace(' ', '')}"
 
 # ======================================================
-# DB
+# CSS — DARK/LIGHT SAFE + MARKETPLACE UX
+# ======================================================
+st.markdown("""
+<style>
+:root {
+    --marsala: #7A263A;
+    --card-light: #ffffff;
+    --card-dark: #1E1E1E;
+    --text-light: #1c1c1c;
+    --text-dark: #f2f2f2;
+    --border-dark: #333;
+}
+
+body {
+    background-color: transparent;
+}
+
+.card {
+    background-color: var(--card-light);
+    color: var(--text-light);
+    padding: 18px;
+    border-radius: 18px;
+    margin-bottom: 16px;
+    box-shadow: 0 8px 18px rgba(0,0,0,0.12);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    border: 1px solid #ddd;
+}
+
+@media (prefers-color-scheme: dark) {
+    .card {
+        background-color: var(--card-dark);
+        color: var(--text-dark);
+        border: 1px solid var(--border-dark);
+    }
+}
+
+.card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 14px 28px rgba(0,0,0,0.35);
+}
+
+.card.esgotado {
+    opacity: 0.45;
+}
+
+.card.ja-escolhido {
+    border: 2px solid var(--marsala);
+}
+
+.badge {
+    display: inline-block;
+    background-color: var(--marsala);
+    color: white;
+    padding: 4px 10px;
+    border-radius: 14px;
+    font-size: 12px;
+    margin-top: 6px;
+}
+
+h1, h2, h3 {
+    color: var(--marsala);
+}
+
+button[kind="primary"] {
+    background-color: var(--marsala) !important;
+    color: white !important;
+    border-radius: 14px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ======================================================
+# DATABASE
 # ======================================================
 client = MongoClient(os.getenv("MONGO_URL"))
 db = client["cha_panela"]
@@ -157,7 +127,7 @@ modo = st.sidebar.radio("Acesso", ["🎁 Convidado", "🔐 Admin"])
 # ======================================================
 if modo == "🔐 Admin":
     if not st.session_state.admin:
-        st.title("🔐 Admin")
+        st.subheader("🔐 Login Admin")
 
         user = st.text_input("Usuário")
         senha = st.text_input("Senha", type="password")
@@ -171,37 +141,18 @@ if modo == "🔐 Admin":
 
         st.stop()
 
-    st.title("📊 Painel Administrativo")
+    st.subheader("📊 Painel Administrativo")
 
-    st.subheader("🎁 Presentes")
     for p in presentes_col.find():
         escolhidos = escolhas_col.count_documents({"presente_id": p["_id"]})
-
         st.markdown(f"""
         <div class="card">
             <strong>{p['nome']}</strong><br>
             <small>{p['categoria']}</small><br>
-            <b>Disponível:</b> {p['quantidade']} | <b>Escolhidos:</b> {escolhidos}
+            <b>Disponível:</b> {p['quantidade']} |
+            <b>Escolhidos:</b> {escolhidos}
         </div>
         """, unsafe_allow_html=True)
-
-    st.divider()
-    st.subheader("👥 Escolhas")
-
-    for e in escolhas_col.find().sort("data", -1):
-        presente = presentes_col.find_one({"_id": e["presente_id"]})
-
-        st.markdown(f"""
-        <div class="card">
-            <strong>{presente['nome']}</strong><br>
-            <small>{e['user_id']} • {e['data'].strftime('%d/%m/%Y %H:%M')}</small>
-        </div>
-        """, unsafe_allow_html=True)
-
-        if st.button("❌ Remover", key=str(e["_id"])):
-            presentes_col.update_one({"_id": e["presente_id"]}, {"$inc": {"quantidade": 1}})
-            escolhas_col.delete_one({"_id": e["_id"]})
-            st.rerun()
 
     if st.button("🚪 Sair"):
         st.session_state.admin = None
@@ -212,56 +163,63 @@ if modo == "🔐 Admin":
 # ======================================================
 # LOGIN CONVIDADO
 # ======================================================
-if not st.session_state.user_id:
-    st.title("🎁 Chá de Panela")
-    st.write("Informe seus dados para continuar 💕")
+if st.session_state.user_id is None:
+    st.markdown("<h1>🎁 Chá de Panela</h1>", unsafe_allow_html=True)
+    st.caption("Escolha seus presentes com carinho 💕")
 
-    nome = st.text_input("Nome completo")
-    telefone = st.text_input("Telefone (opcional)")
+    nome = st.text_input("Nome e sobrenome *")
+    telefone = st.text_input("Telefone (sem DDD, opcional)")
 
-    if st.button("Continuar"):
+    if st.button("Continuar", type="primary"):
         if len(nome.strip().split()) < 2:
-            st.warning("Informe nome e sobrenome")
+            st.warning("Informe nome e sobrenome.")
         else:
             telefone = re.sub(r"\D", "", telefone)
-            st.session_state.user_id = gerar_user_id(nome, telefone)
             st.session_state.nome = nome
+            st.session_state.user_id = gerar_user_id(nome, telefone)
             st.rerun()
 
     st.stop()
 
 # ======================================================
-# LISTAGEM
+# MARKETPLACE — AMAZON / IFOOD STYLE
 # ======================================================
-st.title("🎁 Escolha seus presentes")
-st.write(f"Olá, **{st.session_state.nome}** 💖")
+st.markdown("<h1>🎁 Escolha seus presentes</h1>", unsafe_allow_html=True)
+st.caption(f"👤 {st.session_state.nome} • Você pode escolher mais de um presente")
+
+busca = st.text_input("🔍 Buscar presente", placeholder="Ex: panela, copo, prato...")
 
 escolhas_usuario = list(escolhas_col.find({"user_id": st.session_state.user_id}))
-ids_escolhidos = {e["presente_id"] for e in escolhas_usuario}
+ids_escolhidos = [e["presente_id"] for e in escolhas_usuario]
 
-for categoria in sorted(presentes_col.distinct("categoria")):
-    with st.expander(categoria, expanded=True):
+categorias = sorted(presentes_col.distinct("categoria"))
+
+for categoria in categorias:
+    with st.expander(f"📦 {categoria}", expanded=False):
         itens = list(presentes_col.find({"categoria": categoria}))
 
-        col1, col2 = st.columns(2)
+        cols = st.columns(4)
 
-        for i, item in enumerate(itens):
-            col = col1 if i % 2 == 0 else col2
+        for idx, item in enumerate(itens):
+            if busca and busca.lower() not in item["nome"].lower():
+                continue
 
-            ja = item["_id"] in ids_escolhidos
+            col = cols[idx % 4]
+            ja_escolhido = item["_id"] in ids_escolhidos
             esgotado = item["quantidade"] <= 0
 
             with col:
                 st.markdown(f"""
-                <div class="card {'ja-escolhido' if ja else ''} {'esgotado' if esgotado else ''}">
+                <div class="card {'ja-escolhido' if ja_escolhido else ''} {'esgotado' if esgotado else ''}">
                     <strong>{item['nome']}</strong><br>
                     <small>Disponível: {item['quantidade']}</small><br>
-                    {("<span class='badge'>Já escolhido</span>" if ja else "")}
+                    {("<span class='badge'>Já escolhido</span>" if ja_escolhido else "")}
+                    {("<span class='badge'>Esgotado</span>" if esgotado else "")}
                 </div>
                 """, unsafe_allow_html=True)
 
-                if not ja and not esgotado:
-                    if st.button("Escolher 🎁", key=f"pick_{item['_id']}"):
+                if not esgotado and not ja_escolhido:
+                    if st.button("🎁 Escolher", key=f"pick_{item['_id']}", type="primary"):
                         presentes_col.update_one(
                             {"_id": item["_id"], "quantidade": {"$gt": 0}},
                             {"$inc": {"quantidade": -1}}
@@ -277,8 +235,8 @@ for categoria in sorted(presentes_col.distinct("categoria")):
 # ======================================================
 # MEUS PRESENTES
 # ======================================================
-st.divider()
-st.subheader("🎁 Meus presentes")
+st.markdown("---")
+st.subheader("🎁 Meus presentes escolhidos")
 
 for e in escolhas_usuario:
     presente = presentes_col.find_one({"_id": e["presente_id"]})
@@ -290,6 +248,9 @@ for e in escolhas_usuario:
     """, unsafe_allow_html=True)
 
     if st.button("Trocar", key=f"swap_{e['_id']}"):
-        presentes_col.update_one({"_id": e["presente_id"]}, {"$inc": {"quantidade": 1}})
+        presentes_col.update_one(
+            {"_id": e["presente_id"]},
+            {"$inc": {"quantidade": 1}}
+        )
         escolhas_col.delete_one({"_id": e["_id"]})
         st.rerun()
