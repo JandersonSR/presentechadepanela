@@ -23,43 +23,67 @@ st.set_page_config(
 st.markdown("""
 <style>
 
-/* FUNDO */
-.stApp {
-    background-color: #F6F1EE;
+/* ================================
+   THEME VARIABLES
+================================ */
+:root {
+    --bg-main: #F6F1EE;
+    --card-bg: #FFFFFF;
+    --text-color: #2B2B2B;
+    --border-color: #E0D5D8;
 }
 
-/* CONTAINER */
+/* DARK MODE */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg-main: #121212;
+        --card-bg: #1E1E1E;
+        --text-color: #EDEDED;
+        --border-color: #7A263A;
+    }
+}
+
+/* ================================
+   BASE
+================================ */
+.stApp,
 [data-testid="stAppViewContainer"] {
-    background-color: #F6F1EE;
+    background-color: var(--bg-main) !important;
+    color: var(--text-color);
 }
 
-/* CONTEÚDO */
 [data-testid="stVerticalBlock"] {
     padding: 1.5rem 2.5rem;
 }
 
-/* CARD */
+/* ================================
+   CARD
+================================ */
 .card {
-    background-color: #FFFFFF;
+    background-color: var(--card-bg) !important;
+    color: var(--text-color) !important;
     border-radius: 16px;
     padding: 14px 16px;
     margin-bottom: 12px;
-    box-shadow: 0 8px 18px rgba(0,0,0,0.08);
+    border: 1px solid var(--border-color);
+    box-shadow: 0 6px 14px rgba(0,0,0,0.25);
 }
 
-/* CARD ESCOLHIDO */
+/* JÁ ESCOLHIDO */
 .card.ja-escolhido {
     border: 2px solid #7A263A;
-    background-color: #FFF7F9;
+    background-color: rgba(122,38,58,0.08) !important;
 }
 
 /* ESGOTADO */
 .card.esgotado {
-    opacity: 0.4;
+    opacity: 0.45;
 }
 
-/* TITULOS */
-h1, h2, h3 {
+/* ================================
+   TEXT
+================================ */
+h1, h2, h3, strong {
     color: #7A263A;
 }
 
@@ -67,21 +91,25 @@ h1, h2, h3 {
 .badge {
     display: inline-block;
     background-color: #7A263A;
-    color: white;
+    color: #FFFFFF;
     padding: 4px 10px;
     border-radius: 999px;
     font-size: 11px;
     margin-top: 6px;
 }
 
-/* BOTÃO */
+/* ================================
+   BUTTON
+================================ */
 button[kind="primary"] {
     background-color: #7A263A !important;
     color: white !important;
     border-radius: 12px !important;
 }
 
-/* MOBILE */
+/* ================================
+   MOBILE
+================================ */
 @media (max-width: 900px) {
     [data-testid="stVerticalBlock"] {
         padding: 1rem;
