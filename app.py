@@ -122,7 +122,7 @@ if modo == "🔐 Admin":
         st.markdown(f"""
         <div class="card">
             <strong>{p['nome']}</strong><br>
-            <small>{p['categoria']} • {p['faixa_preco']}</small><br>
+            <small>{p['categoria']} • </small><br>
             <b>Restam:</b> {p['quantidade']} |
             <b>Escolhidos:</b> {total_escolhido}
         </div>
