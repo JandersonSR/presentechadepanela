@@ -6,58 +6,68 @@ import re
 import os
 from dotenv import load_dotenv
 
+# ======================================================
+# CONFIG INICIAL
+# ======================================================
 load_dotenv()
+
+st.set_page_config(
+    page_title="Chá de Panela",
+    page_icon="🎁",
+    layout="wide"
+)
 
 # ======================================================
 # FUNÇÕES AUXILIARES
 # ======================================================
+
 def normalizar(texto: str) -> str:
     texto = unicodedata.normalize("NFD", texto)
     texto = texto.encode("ascii", "ignore").decode("utf-8")
-    texto = re.sub(r"[^a-zA-Z0-9]", "", texto)
-    return texto.lower()
+    texto = re.sub(r"[^a-zA-Z0-9 ]", "", texto)
+    return texto.lower().strip()
+
 
 def gerar_user_id(nome, telefone):
     if telefone:
         return f"tel_{telefone}"
-    return f"nome_{normalizar(nome)}"
+    return f"nome_{normalizar(nome).replace(' ', '_')}"
 
 # ======================================================
-# CONFIGURAÇÃO
-# ======================================================
-st.set_page_config(
-    page_title="Chá de Panela",
-    page_icon="🎁",
-    layout="centered"
-)
-
-# ======================================================
-# CSS — MARSALA
+# CSS — UX DESKTOP FIRST
 # ======================================================
 st.markdown("""
 <style>
 body { background-color: #F6F1EE; }
-h1, h2, h3 { color: #7A263A; }
+h1, h2, h3, h4 { color: #7A263A; }
+
 .card {
     background: white;
-    padding: 16px;
-    border-radius: 16px;
-    margin-bottom: 12px;
-    box-shadow: 0 6px 14px rgba(0,0,0,0.08);
+    padding: 14px;
+    border-radius: 14px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+    margin-bottom: 14px;
 }
-.card.esgotado { opacity: 0.45; }
+
+.card small { color: #555; }
+
+.card.esgotado { opacity: 0.4; }
 .card.ja-escolhido { border: 2px solid #7A263A; }
+
 .badge {
+    display: inline-block;
     background: #7A263A;
     color: white;
     padding: 4px 10px;
     border-radius: 12px;
-    font-size: 12px;
+    font-size: 11px;
+    margin-top: 6px;
 }
+
 button {
     background-color: #7A263A !important;
     color: white !important;
-    border-radius: 12px !important;
+    border-radius: 10px !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -66,7 +76,6 @@ button {
 # MONGODB
 # ======================================================
 client = MongoClient(os.getenv("MONGO_URL"))
-
 db = client["cha_panela"]
 presentes_col = db["presentes"]
 escolhas_col = db["escolhas"]
@@ -79,102 +88,72 @@ for key in ["user_id", "nome", "admin"]:
         st.session_state[key] = None
 
 # ======================================================
-# MENU SUPERIOR
+# SIDEBAR — LOGIN / ADMIN
 # ======================================================
-modo = st.sidebar.radio(
-    "Acesso",
-    ["🎁 Convidado", "🔐 Admin"]
-)
+modo = st.sidebar.radio("Acesso", ["🎁 Convidado", "🔐 Admin"])
 
 # ======================================================
-# LOGIN ADMIN
+# ADMIN
 # ======================================================
 if modo == "🔐 Admin":
     if not st.session_state.admin:
-        st.subheader("🔐 Acesso Administrativo")
-
-        user = st.text_input("Usuário")
-        senha = st.text_input("Senha", type="password")
-
-        if st.button("Entrar"):
-            if (
-                user == os.getenv("ADMIN_USER")
-                and senha == os.getenv("ADMIN_PASSWORD")
-            ):
+        st.sidebar.subheader("🔐 Login Admin")
+        user = st.sidebar.text_input("Usuário")
+        senha = st.sidebar.text_input("Senha", type="password")
+        if st.sidebar.button("Entrar"):
+            if user == os.getenv("ADMIN_USER") and senha == os.getenv("ADMIN_PASSWORD"):
                 st.session_state.admin = True
                 st.rerun()
             else:
-                st.error("Usuário ou senha inválidos")
-
+                st.sidebar.error("Credenciais inválidas")
         st.stop()
 
-    # ==================================================
-    # PAINEL ADMIN
-    # ==================================================
-    st.subheader("📊 Painel Administrativo")
+    st.title("📊 Painel Administrativo")
 
-    st.markdown("### 🎁 Presentes e Estoque")
-    for p in presentes_col.find():
-        total_escolhido = escolhas_col.count_documents(
-            {"presente_id": p["_id"]}
-        )
+    col1, col2 = st.columns([2, 1])
 
-        st.markdown(f"""
-        <div class="card">
-            <strong>{p['nome']}</strong><br>
-            <small>{p['categoria']} • </small><br>
-            <b>Restam:</b> {p['quantidade']} |
-            <b>Escolhidos:</b> {total_escolhido}
-        </div>
-        """, unsafe_allow_html=True)
+    with col1:
+        st.subheader("🎁 Presentes")
+        for p in presentes_col.find().sort("categoria"):
+            escolhidos = escolhas_col.count_documents({"presente_id": p["_id"]})
+            st.markdown(f"""
+            <div class="card">
+                <strong>{p['nome']}</strong><br>
+                <small>{p['categoria']}</small><br>
+                <b>Estoque:</b> {p['quantidade']} | <b>Escolhidos:</b> {escolhidos}
+            </div>
+            """, unsafe_allow_html=True)
 
-    st.markdown("---")
-    st.markdown("### 👥 Escolhas dos Convidados")
+    with col2:
+        st.subheader("👥 Últimas escolhas")
+        for e in escolhas_col.find().sort("data", -1).limit(10):
+            presente = presentes_col.find_one({"_id": e["presente_id"]})
+            st.markdown(f"""
+            <div class="card">
+                <strong>{presente['nome']}</strong><br>
+                <small>{e['user_id']}<br>{e['data'].strftime('%d/%m %H:%M')}</small>
+            </div>
+            """, unsafe_allow_html=True)
 
-    escolhas = list(escolhas_col.find().sort("data", -1))
-
-    for e in escolhas:
-        presente = presentes_col.find_one({"_id": e["presente_id"]})
-
-        st.markdown(f"""
-        <div class="card">
-            <strong>{presente['nome']}</strong><br>
-            <small>
-                Convidado: {e['user_id']}<br>
-                Data: {e['data'].strftime('%d/%m/%Y %H:%M')}
-            </small>
-        </div>
-        """, unsafe_allow_html=True)
-
-        if st.button("❌ Remover escolha", key=f"del_{e['_id']}"):
-            presentes_col.update_one(
-                {"_id": e["presente_id"]},
-                {"$inc": {"quantidade": 1}}
-            )
-            escolhas_col.delete_one({"_id": e["_id"]})
-            st.rerun()
-
-    if st.button("🚪 Sair do admin"):
+    if st.sidebar.button("🚪 Sair"):
         st.session_state.admin = None
         st.rerun()
 
     st.stop()
 
 # ======================================================
-# MODO CONVIDADO (APP PRINCIPAL)
+# LOGIN CONVIDADO
 # ======================================================
-# (mantém exatamente o fluxo que você já aprovou)
-
 if st.session_state.user_id is None:
-    st.markdown("<h1>🎁 Chá de Panela</h1>", unsafe_allow_html=True)
+    st.title("🎁 Chá de Panela")
     st.write("Informe seus dados para continuar 💕")
 
-    nome = st.text_input("Nome e sobrenome *")
-    telefone = st.text_input("Telefone (sem DDD, opcional)")
+    nome = st.text_input("Nome completo *")
+    telefone = st.text_input("Telefone (opcional)")
 
     if st.button("Continuar"):
-        if not nome.strip() or len(nome.strip().split()) < 2:
-            st.warning("Informe nome e sobrenome.")
+        if len(nome.strip().split()) < 2:
+            st.warning("Informe nome e sobrenome")
         else:
             telefone = re.sub(r"\D", "", telefone)
             st.session_state.user_id = gerar_user_id(nome, telefone)
@@ -184,61 +163,77 @@ if st.session_state.user_id is None:
     st.stop()
 
 # ======================================================
-# LISTAGEM CONVIDADO
+# APP PRINCIPAL — UX DESKTOP
 # ======================================================
-st.markdown("<h1>🎁 Escolha seus presentes</h1>", unsafe_allow_html=True)
+st.title("🎁 Escolha seus presentes")
 st.write(f"Olá, **{st.session_state.nome}** 💖")
 
-escolhas_usuario = list(
-    escolhas_col.find({"user_id": st.session_state.user_id})
-)
+busca = st.text_input("🔎 Buscar presente")
+
+escolhas_usuario = list(escolhas_col.find({"user_id": st.session_state.user_id}))
 ids_escolhidos = [e["presente_id"] for e in escolhas_usuario]
 
-for categoria in sorted(presentes_col.distinct("categoria")):
-    st.markdown(f"### {categoria}")
+query_busca = {}
+if busca:
+    query_busca["nome"] = {"$regex": busca, "$options": "i"}
 
-    for item in presentes_col.find({"categoria": categoria}):
-        ja_escolhido = item["_id"] in ids_escolhidos
-        esgotado = item["quantidade"] <= 0
+# TABS
+catalogo, meus_presentes = st.tabs(["🎁 Catálogo", "💝 Meus Presentes"])
 
+with catalogo:
+    for categoria in sorted(presentes_col.distinct("categoria")):
+        st.subheader(categoria)
+
+        itens = list(presentes_col.find({"categoria": categoria, **query_busca}))
+        if not itens:
+            continue
+
+        cols = st.columns(3)
+
+        for idx, item in enumerate(itens):
+            col = cols[idx % 3]
+            with col:
+                ja_escolhido = item["_id"] in ids_escolhidos
+                esgotado = item["quantidade"] <= 0
+
+                st.markdown(f"""
+                <div class="card {'ja-escolhido' if ja_escolhido else ''} {'esgotado' if esgotado else ''}">
+                    <strong>{item['nome']}</strong><br>
+                    <small>Restam {item['quantidade']}</small><br>
+                    {"<span class='badge'>Já escolhido</span>" if ja_escolhido else ""}
+                </div>
+                """, unsafe_allow_html=True)
+
+                if not esgotado and not ja_escolhido:
+                    if st.button("Escolher 🎁", key=f"pick_{item['_id']}"):
+                        presentes_col.update_one(
+                            {"_id": item["_id"], "quantidade": {"$gt": 0}},
+                            {"$inc": {"quantidade": -1}}
+                        )
+                        escolhas_col.insert_one({
+                            "user_id": st.session_state.user_id,
+                            "nome": normalizar(st.session_state.nome),
+                            "presente_id": item["_id"],
+                            "data": datetime.utcnow()
+                        })
+                        st.rerun()
+
+with meus_presentes:
+    if not escolhas_usuario:
+        st.info("Você ainda não escolheu nenhum presente 💝")
+
+    for e in escolhas_usuario:
+        presente = presentes_col.find_one({"_id": e["presente_id"]})
         st.markdown(f"""
-        <div class="card {'ja-escolhido' if ja_escolhido else ''}">
-            <strong>{item['nome']}</strong><br>
-            <small>• Restam {item['quantidade']}</small><br>
-            {("<span class='badge'>Já escolhido</span>" if ja_escolhido else "")}
+        <div class="card">
+            <strong>{presente['nome']}</strong>
         </div>
         """, unsafe_allow_html=True)
 
-        if not esgotado and not ja_escolhido:
-            if st.button("Escolher 🎁", key=f"pick_{item['_id']}"):
-                presentes_col.update_one(
-                    {"_id": item["_id"], "quantidade": {"$gt": 0}},
-                    {"$inc": {"quantidade": -1}}
-                )
-                escolhas_col.insert_one({
-                    "user_id": st.session_state.user_id,
-                    "nome": normalizar(st.session_state.nome),
-                    "presente_id": item["_id"],
-                    "data": datetime.utcnow()
-                })
-                st.rerun()
-
-st.markdown("---")
-st.subheader("🎁 Meus presentes")
-
-for e in escolhas_usuario:
-    presente = presentes_col.find_one({"_id": e["presente_id"]})
-
-    st.markdown(f"""
-    <div class="card">
-        <strong>{presente['nome']}</strong>
-    </div>
-    """, unsafe_allow_html=True)
-
-    if st.button("Trocar", key=f"swap_{e['_id']}"):
-        presentes_col.update_one(
-            {"_id": e["presente_id"]},
-            {"$inc": {"quantidade": 1}}
-        )
-        escolhas_col.delete_one({"_id": e["_id"]})
-        st.rerun()
+        if st.button("Trocar", key=f"swap_{e['_id']}"):
+            presentes_col.update_one(
+                {"_id": e["presente_id"]},
+                {"$inc": {"quantidade": 1}}
+            )
+            escolhas_col.delete_one({"_id": e["_id"]})
+            st.rerun()
