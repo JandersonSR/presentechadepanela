@@ -204,7 +204,7 @@ for categoria in sorted(presentes_col.distinct("categoria")):
         st.markdown(f"""
         <div class="card {'ja-escolhido' if ja_escolhido else ''}">
             <strong>{item['nome']}</strong><br>
-            <small>{item['faixa_preco']} • Restam {item['quantidade']}</small><br>
+            <small>• Restam {item['quantidade']}</small><br>
             {("<span class='badge'>Já escolhido</span>" if ja_escolhido else "")}
         </div>
         """, unsafe_allow_html=True)
