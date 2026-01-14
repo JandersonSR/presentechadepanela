@@ -143,9 +143,20 @@ if modo == "🔐 Admin":
 
     st.subheader("📊 Painel Administrativo")
 
-     col1, col2 = st.columns([2, 1])
-
+    col1, col2 = st.columns([2, 1])
+    
     with col1:
+        st.subheader("👥 Escolhas")
+        for e in escolhas_col.find().sort("data", -1):
+            presente = presentes_col.find_one({"_id": e["presente_id"]})
+            st.markdown(f"""
+            <div class="card">
+                <strong>{presente['nome']}</strong><br>
+                <small>{e['user_id']}<br>{e['data'].strftime('%d/%m %H:%M')}</small>
+            </div>
+            """, unsafe_allow_html=True)
+
+    with col2:
         for p in presentes_col.find():
             escolhidos = escolhas_col.count_documents({"presente_id": p["_id"]})
             st.markdown(f"""
@@ -154,17 +165,6 @@ if modo == "🔐 Admin":
                 <small>{p['categoria']}</small><br>
                 <b>Disponível:</b> {p['quantidade']} |
                 <b>Escolhidos:</b> {escolhidos}
-            </div>
-            """, unsafe_allow_html=True)
-
-     with col2:
-        st.subheader("👥 Escolhas")
-        for e in escolhas_col.find().sort("data", -1):
-            presente = presentes_col.find_one({"_id": e["presente_id"]})
-            st.markdown(f"""
-            <div class="card">
-                <strong>{presente['nome']}</strong><br>
-                <small>{e['user_id']}<br>{e['data'].strftime('%d/%m %H:%M')}</small>
             </div>
             """, unsafe_allow_html=True)
 
