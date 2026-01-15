@@ -3,6 +3,7 @@ from pymongo import MongoClient
 from datetime import datetime
 import unicodedata, re, os
 from dotenv import load_dotenv
+from bson import ObjectId
 
 # ======================================================
 # INIT
@@ -28,7 +29,7 @@ def gerar_user_id(nome):
     return f"nome_{normalizar(nome).replace(' ', '')}"
 
 # ======================================================
-# CSS — PREMIUM SAFE
+# CSS
 # ======================================================
 st.markdown("""
 <style>
@@ -78,7 +79,7 @@ escolhas_col = db["escolhas"]
 # ======================================================
 for k in [
     "user_id","nome","telefone","admin",
-    "admin_view","admin_modal_item","admin_modal_guest"
+    "admin_view","modal_item","modal_guest"
 ]:
     st.session_state.setdefault(k, None)
 
@@ -105,135 +106,153 @@ if modo == "🔐 Admin":
                 st.error("Credenciais inválidas")
         st.stop()
 
-    st.title("📊 Painel Administrativo — Chá de Panela")
+    st.title("📊 Painel Administrativo")
 
-    # ==================================================
-    # MÉTRICAS + NAVEGAÇÃO
-    # ==================================================
+    # ================= METRICS =================
     total_itens = presentes_col.count_documents({})
     total_escolhas = escolhas_col.count_documents({})
     convidados = len(escolhas_col.distinct("user_id"))
-    itens_sem_escolha = total_itens - len(escolhas_col.distinct("presente_id"))
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3 = st.columns(3)
 
     with c1:
         st.metric("🎁 Itens", total_itens)
-        if st.button("Ver itens"):
+        if st.button("📦 Gerenciar itens"):
             st.session_state.admin_view = "itens"
 
     with c2:
         st.metric("✅ Escolhas", total_escolhas)
-        if st.button("Ver escolhas"):
+        if st.button("🎁 Ver escolhas"):
             st.session_state.admin_view = "escolhas"
 
     with c3:
         st.metric("👥 Convidados", convidados)
-        if st.button("Ver convidados"):
+        if st.button("👥 Ver convidados"):
             st.session_state.admin_view = "convidados"
-
-    with c4:
-        st.metric("🟡 Sem escolha", itens_sem_escolha)
 
     st.divider()
 
     # ==================================================
-    # VIEW: ITENS
+    # CRUD ITENS
     # ==================================================
     if st.session_state.admin_view in (None, "itens"):
+        st.subheader("➕ Novo presente")
 
+        with st.form("novo_item"):
+            nome = st.text_input("Nome")
+            categoria = st.text_input("Categoria")
+            qtd = st.number_input("Quantidade", 1, 10, 1)
+            salvar = st.form_submit_button("Salvar")
+
+            if salvar:
+                presentes_col.insert_one({
+                    "nome": nome,
+                    "categoria": categoria,
+                    "quantidade": qtd
+                })
+                st.success("Item criado")
+                st.rerun()
+
+        st.divider()
         st.subheader("📦 Itens cadastrados")
 
-        categorias = ["Todas"] + sorted(presentes_col.distinct("categoria"))
+        for item in presentes_col.find().sort("categoria"):
+            escolhidos = escolhas_col.count_documents({"presente_id": item["_id"]})
 
-        f1, f2, f3 = st.columns(3)
-        with f1:
-            filtro_categoria = st.selectbox("Categoria", categorias)
-        with f2:
-            filtro_status = st.selectbox("Status", ["Todos", "Sem escolha", "Com escolha"])
-        with f3:
-            filtro_qtd = st.slider("Quantidade disponível", 0, 10, (0, 10))
+            st.markdown(f"""
+            <div class="card">
+                <strong>{item['nome']}</strong><br>
+                Categoria: {item['categoria']}<br>
+                Quantidade: {item['quantidade']}<br>
+                Escolhido: {escolhidos}x
+            </div>
+            """, unsafe_allow_html=True)
 
-        for categoria in sorted(presentes_col.distinct("categoria")):
-            if filtro_categoria != "Todas" and categoria != filtro_categoria:
-                continue
+            c1, c2, c3 = st.columns(3)
 
-            with st.expander(f"📦 {categoria}", expanded=False):
-                for item in presentes_col.find({"categoria": categoria}):
+            with c1:
+                if st.button("👥 Ver convidados", key=f"view_{item['_id']}"):
+                    st.session_state.modal_item = item["_id"]
 
-                    escolhidos = escolhas_col.count_documents(
-                        {"presente_id": item["_id"]}
-                    )
-
-                    if filtro_status == "Sem escolha" and escolhidos > 0:
-                        continue
-                    if filtro_status == "Com escolha" and escolhidos == 0:
-                        continue
-                    if not (filtro_qtd[0] <= item["quantidade"] <= filtro_qtd[1]):
-                        continue
-
-                    st.markdown(f"""
-                    <div class="card">
-                        <strong>{item['nome']}</strong><br>
-                        Restantes: {item['quantidade']}<br>
-                        Escolhido: {escolhidos}x
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    if st.button("👥 Ver convidados", key=f"item_{item['_id']}"):
-                        st.session_state.admin_modal_item = item["_id"]
-
-                    if st.session_state.admin_modal_item == item["_id"]:
-                        with st.expander("Convidados que escolheram", expanded=True):
-                            regs = list(
-                                escolhas_col.find({"presente_id": item["_id"]})
+            with c2:
+                if st.button("✏️ Editar", key=f"edit_{item['_id']}"):
+                    with st.dialog("Editar item"):
+                        novo_nome = st.text_input("Nome", item["nome"])
+                        nova_qtd = st.number_input("Quantidade", 0, 10, item["quantidade"])
+                        if st.button("Salvar"):
+                            presentes_col.update_one(
+                                {"_id": item["_id"]},
+                                {"$set":{"nome":novo_nome,"quantidade":nova_qtd}}
                             )
+                            st.rerun()
 
-                            if not regs:
-                                st.info("Nenhum convidado escolheu este item")
-                            else:
-                                for r in regs:
-                                    st.markdown(
-                                        f"• **{r['nome']}** — {r.get('telefone','-')}"
-                                    )
+            with c3:
+                if st.button("🗑️ Excluir", key=f"del_{item['_id']}"):
+                    presentes_col.delete_one({"_id": item["_id"]})
+                    escolhas_col.delete_many({"presente_id": item["_id"]})
+                    st.rerun()
 
-                            if st.button("Fechar", key=f"close_item_{item['_id']}"):
-                                st.session_state.admin_modal_item = None
-                                st.rerun()
+        # ================= MODAL ITEM =================
+        if st.session_state.modal_item:
+            item = presentes_col.find_one({"_id": st.session_state.modal_item})
+
+            with st.dialog(f"👥 {item['nome']}"):
+                regs = list(escolhas_col.find({"presente_id": item["_id"]}))
+
+                if not regs:
+                    st.info("Nenhum convidado escolheu este item")
+                else:
+                    for r in regs:
+                        st.markdown(f"**{r['nome']}** — {r.get('telefone','-')}")
+                        if st.button("❌ Remover escolha", key=str(r["_id"])):
+                            escolhas_col.delete_one({"_id": r["_id"]})
+                            presentes_col.update_one(
+                                {"_id": item["_id"]},
+                                {"$inc":{"quantidade":1}}
+                            )
+                            st.rerun()
+
+                if st.button("Fechar"):
+                    st.session_state.modal_item = None
+                    st.rerun()
 
     # ==================================================
-    # VIEW: CONVIDADOS
+    # view CONVIDADOS
     # ==================================================
     if st.session_state.admin_view == "convidados":
-
         st.subheader("👥 Convidados")
 
-        convidados_lista = sorted(escolhas_col.distinct("user_id"))
+        for uid in escolhas_col.distinct("user_id"):
+            regs = list(escolhas_col.find({"user_id": uid}))
+            nome = regs[0]["nome"]
 
-        convidado_sel = st.selectbox(
-            "Selecione um convidado",
-            ["Selecione"] + convidados_lista
-        )
+            if st.button(nome, key=uid):
+                st.session_state.modal_guest = uid
 
-        if convidado_sel != "Selecione":
-            regs = list(escolhas_col.find({"user_id": convidado_sel}))
+        if st.session_state.modal_guest:
+            regs = list(escolhas_col.find({"user_id": st.session_state.modal_guest}))
 
-            with st.expander(
-                f"🎁 Itens escolhidos por {regs[0]['nome']}",
-                expanded=True
-            ):
-                st.markdown(f"📞 {regs[0].get('telefone','-')}")
-                st.divider()
-
+            with st.dialog(f"🎁 Escolhas de {regs[0]['nome']}"):
                 for r in regs:
                     p = presentes_col.find_one({"_id": r["presente_id"]})
                     st.markdown(f"• {p['nome']}")
+                    if st.button("❌ Remover", key=str(r["_id"])):
+                        escolhas_col.delete_one({"_id": r["_id"]})
+                        presentes_col.update_one(
+                            {"_id": p["_id"]},
+                            {"$inc":{"quantidade":1}}
+                        )
+                        st.rerun()
+
+                if st.button("Fechar"):
+                    st.session_state.modal_guest = None
+                    st.rerun()
 
     st.stop()
 
-# ======================================================
-# LOGIN CONVIDADO
-# ======================================================
+ # ======================================================
+ # LOGIN CONVIDADO
+ # ======================================================
 if not st.session_state.user_id:
     st.title("🎁 Chá de Panela")
     nome = st.text_input("Nome e sobrenome")
