@@ -32,7 +32,7 @@ def gerar_user_id(nome, telefone):
     return f"nome_{normalizar(nome).replace(' ', '')}"
 
 # ======================================================
-# CSS — DARK/LIGHT SAFE + MARKETPLACE UX
+# CSS — UX PROFISSIONAL (DARK/LIGHT SAFE)
 # ======================================================
 st.markdown("""
 <style>
@@ -45,19 +45,16 @@ st.markdown("""
     --border-dark: #333;
 }
 
-body {
-    background-color: transparent;
-}
-
 .card {
     background-color: var(--card-light);
     color: var(--text-light);
     padding: 18px;
     border-radius: 18px;
-    margin-bottom: 16px;
     box-shadow: 0 8px 18px rgba(0,0,0,0.12);
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
     border: 1px solid #ddd;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    margin-bottom: 14px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -73,31 +70,37 @@ body {
     box-shadow: 0 14px 28px rgba(0,0,0,0.35);
 }
 
-.card.esgotado {
-    opacity: 0.45;
-}
-
-.card.ja-escolhido {
-    border: 2px solid var(--marsala);
-}
+.card.esgotado { opacity: 0.45; }
+.card.ja-escolhido { border: 2px solid var(--marsala); }
 
 .badge {
-    display: inline-block;
     background-color: var(--marsala);
     color: white;
     padding: 4px 10px;
     border-radius: 14px;
     font-size: 12px;
+    display: inline-block;
     margin-top: 6px;
 }
 
-h1, h2, h3 {
-    color: var(--marsala);
+.indicador {
+    position: sticky;
+    top: 0;
+    z-index: 999;
+    background: rgba(255,255,255,0.85);
+    padding: 10px;
+    border-radius: 12px;
+    margin-bottom: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+    .indicador {
+        background: rgba(30,30,30,0.9);
+    }
 }
 
 button[kind="primary"] {
     background-color: var(--marsala) !important;
-    color: white !important;
     border-radius: 14px !important;
 }
 </style>
@@ -128,7 +131,6 @@ modo = st.sidebar.radio("Acesso", ["🎁 Convidado", "🔐 Admin"])
 if modo == "🔐 Admin":
     if not st.session_state.admin:
         st.subheader("🔐 Login Admin")
-
         user = st.text_input("Usuário")
         senha = st.text_input("Senha", type="password")
 
@@ -138,39 +140,73 @@ if modo == "🔐 Admin":
                 st.rerun()
             else:
                 st.error("Credenciais inválidas")
-
         st.stop()
 
-    st.subheader("📊 Painel Administrativo")
+    st.title("📊 Painel Administrativo")
 
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.subheader("👥 Escolhas")
+    tab1, tab2, tab3 = st.tabs(["👥 Escolhas", "🎁 Itens", "➕ Criar / Editar"])
+
+    # ---------- TAB ESCOLHAS ----------
+    with tab1:
         for e in escolhas_col.find().sort("data", -1):
             presente = presentes_col.find_one({"_id": e["presente_id"]})
             st.markdown(f"""
             <div class="card">
                 <strong>{presente['nome']}</strong><br>
-                <small>{e['user_id']}<br>{e['data'].strftime('%d/%m %H:%M')}</small>
+                <small>{e['user_id']} • {e['data'].strftime('%d/%m %H:%M')}</small>
             </div>
             """, unsafe_allow_html=True)
 
-    with col2:
+            if st.button("❌ Remover escolha", key=f"del_{e['_id']}"):
+                presentes_col.update_one({"_id": e["presente_id"]}, {"$inc": {"quantidade": 1}})
+                escolhas_col.delete_one({"_id": e["_id"]})
+                st.rerun()
+
+    # ---------- TAB ITENS ----------
+    with tab2:
         for p in presentes_col.find():
             escolhidos = escolhas_col.count_documents({"presente_id": p["_id"]})
             st.markdown(f"""
             <div class="card">
                 <strong>{p['nome']}</strong><br>
                 <small>{p['categoria']}</small><br>
-                <b>Disponível:</b> {p['quantidade']} |
-                <b>Escolhidos:</b> {escolhidos}
+                Disponível: {p['quantidade']} | Escolhidos: {escolhidos}
             </div>
             """, unsafe_allow_html=True)
 
-    if st.button("🚪 Sair"):
-        st.session_state.admin = None
-        st.rerun()
+    # ---------- TAB CRUD ----------
+    with tab3:
+        st.subheader("Criar / Editar Item")
+
+        itens = list(presentes_col.find())
+        item_sel = st.selectbox(
+            "Editar item existente",
+            ["NOVO"] + [i["_id"] for i in itens]
+        )
+
+        if item_sel != "NOVO":
+            item = presentes_col.find_one({"_id": item_sel})
+        else:
+            item = {"_id": "", "nome": "", "categoria": "", "quantidade": 1}
+
+        _id = st.text_input("ID", item["_id"])
+        nome = st.text_input("Nome", item["nome"])
+        categoria = st.text_input("Categoria", item["categoria"])
+        quantidade = st.number_input("Quantidade", min_value=0, value=item["quantidade"])
+
+        if st.button("💾 Salvar"):
+            presentes_col.update_one(
+                {"_id": _id},
+                {"$set": {
+                    "_id": _id,
+                    "nome": nome,
+                    "categoria": categoria,
+                    "quantidade": quantidade
+                }},
+                upsert=True
+            )
+            st.success("Item salvo com sucesso")
+            st.rerun()
 
     st.stop()
 
@@ -178,93 +214,54 @@ if modo == "🔐 Admin":
 # LOGIN CONVIDADO
 # ======================================================
 if st.session_state.user_id is None:
-    st.markdown("<h1>🎁 Chá de Panela</h1>", unsafe_allow_html=True)
-    st.caption("Escolha seus presentes com carinho 💕")
-
-    nome = st.text_input("Nome e sobrenome *")
-    telefone = st.text_input("Telefone (sem DDD, opcional)")
+    st.title("🎁 Chá de Panela")
+    nome = st.text_input("Nome e sobrenome")
+    telefone = st.text_input("Telefone (opcional)")
 
     if st.button("Continuar", type="primary"):
-        if len(nome.strip().split()) < 2:
-            st.warning("Informe nome e sobrenome.")
+        if len(nome.split()) < 2:
+            st.warning("Informe nome e sobrenome")
         else:
-            telefone = re.sub(r"\D", "", telefone)
             st.session_state.nome = nome
             st.session_state.user_id = gerar_user_id(nome, telefone)
             st.rerun()
-
     st.stop()
 
 # ======================================================
-# MARKETPLACE — AMAZON / IFOOD STYLE
+# CONVIDADO UX
 # ======================================================
-st.markdown("<h1>🎁 Escolha seus presentes</h1>", unsafe_allow_html=True)
-st.caption(f"👤 {st.session_state.nome} • Você pode escolher mais de um presente")
-
-busca = st.text_input("🔍 Buscar presente", placeholder="Ex: panela, copo, prato...")
-
 escolhas_usuario = list(escolhas_col.find({"user_id": st.session_state.user_id}))
 ids_escolhidos = [e["presente_id"] for e in escolhas_usuario]
 
-categorias = sorted(presentes_col.distinct("categoria"))
+st.markdown(f"""
+<div class="indicador">
+🎁 Você escolheu <strong>{len(ids_escolhidos)}</strong> presentes
+</div>
+""", unsafe_allow_html=True)
 
-for categoria in categorias:
+busca = st.text_input("🔍 Buscar presente")
+
+for categoria in sorted(presentes_col.distinct("categoria")):
     with st.expander(f"📦 {categoria}", expanded=False):
-        itens = list(presentes_col.find({"categoria": categoria}))
-
         cols = st.columns(4)
-
-        for idx, item in enumerate(itens):
+        for i, item in enumerate(presentes_col.find({"categoria": categoria})):
             if busca and busca.lower() not in item["nome"].lower():
                 continue
 
-            col = cols[idx % 4]
-            ja_escolhido = item["_id"] in ids_escolhidos
+            col = cols[i % 4]
+            ja = item["_id"] in ids_escolhidos
             esgotado = item["quantidade"] <= 0
 
             with col:
-                st.markdown(f"""
-                <div class="card {'ja-escolhido' if ja_escolhido else ''} {'esgotado' if esgotado else ''}">
-                    <strong>{item['nome']}</strong><br>
-                    <small>Disponível: {item['quantidade']}</small><br>
-                    {("<span class='badge'>Já escolhido</span>" if ja_escolhido else "")}
-                    {("<span class='badge'>Esgotado</span>" if esgotado else "")}
-                </div>
-                """, unsafe_allow_html=True)
-
-                if not esgotado and not ja_escolhido:
-                    if st.button("🎁 Escolher", key=f"pick_{item['_id']}", type="primary"):
-                        presentes_col.update_one(
-                            {"_id": item["_id"], "quantidade": {"$gt": 0}},
-                            {"$inc": {"quantidade": -1}}
-                        )
-                        escolhas_col.insert_one({
-                            "user_id": st.session_state.user_id,
-                            "nome": normalizar(st.session_state.nome),
-                            "presente_id": item["_id"],
-                            "data": datetime.utcnow()
-                        })
-                        st.rerun()
-
-# ======================================================
-# MEUS PRESENTES
-# ======================================================
-st.markdown("---")
-st.subheader("🎁 Meus presentes escolhidos")
-
-for e in escolhas_usuario:
-    presente = presentes_col.find_one({"_id": e["presente_id"]})
-
-    st.markdown(f"""
-    <div class="card">
-        <strong>{presente['nome']}</strong>
-    </div>
-    """, unsafe_allow_html=True)
-
-    if st.button("Trocar", key=f"swap_{e['_id']}"):
-        presentes_col.update_one(
-            {"_id": e["presente_id"]},
-            {"$inc": {"quantidade": 1}}
-        )
-        escolhas_col.delete_one({"_id": e["_id"]})
-        st.rerun()
+                if st.button(
+                    f"{item['nome']} • {item['quantidade']} disponíveis",
+                    key=f"card_{item['_id']}",
+                    disabled=esgotado or ja
+                ):
+                    presentes_col.update_one({"_id": item["_id"]}, {"$inc": {"quantidade": -1}})
+                    escolhas_col.insert_one({
+                        "user_id": st.session_state.user_id,
+                        "presente_id": item["_id"],
+                        "data": datetime.utcnow()
+                    })
+                    st.rerun()
