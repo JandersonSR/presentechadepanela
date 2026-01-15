@@ -102,55 +102,121 @@ if modo == "🔐 Admin":
                 st.error("Credenciais inválidas")
         st.stop()
 
-    st.title("📊 Admin — Chá de Panela")
+    st.title("📊 Painel Administrativo — Chá de Panela")
 
+    # ==================================================
+    # MÉTRICAS
+    # ==================================================
     total_itens = presentes_col.count_documents({})
     total_escolhas = escolhas_col.count_documents({})
     convidados = len(escolhas_col.distinct("user_id"))
+    itens_sem_escolha = total_itens - len(escolhas_col.distinct("presente_id"))
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("🎁 Itens cadastrados", total_itens)
-    c2.metric("✅ Escolhas feitas", total_escolhas)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("🎁 Itens", total_itens)
+    c2.metric("✅ Escolhas", total_escolhas)
     c3.metric("👥 Convidados", convidados)
+    c4.metric("🟡 Sem escolha", itens_sem_escolha)
 
     st.divider()
 
-    # CRUD
-    with st.expander("➕ Adicionar presente"):
-        nome = st.text_input("Nome do presente")
-        categoria = st.text_input("Categoria")
-        qtd = st.number_input("Quantidade", min_value=1, step=1)
+    # ==================================================
+    # FILTROS DE ITENS
+    # ==================================================
+    st.subheader("📦 Itens cadastrados")
 
-        if st.button("Salvar"):
-            presentes_col.insert_one({
-                "nome": nome,
-                "categoria": categoria,
-                "quantidade": qtd
-            })
-            st.success("Presente adicionado")
-            st.rerun()
+    categorias = ["Todas"] + sorted(presentes_col.distinct("categoria"))
 
-    st.subheader("📦 Lista de presentes")
+    f1, f2, f3 = st.columns(3)
+    with f1:
+        filtro_categoria = st.selectbox("Categoria", categorias)
+    with f2:
+        filtro_status = st.selectbox(
+            "Status",
+            ["Todos", "Sem escolha", "Com escolha"]
+        )
+    with f3:
+        filtro_qtd = st.slider(
+            "Quantidade disponível",
+            0, 10, (0, 10)
+        )
 
-    for p in presentes_col.find().sort("categoria",1):
-        usados = escolhas_col.count_documents({"presente_id": p["_id"]})
-        st.markdown(f"""
-        <div class="card">
-            <strong>{p['nome']}</strong><br>
-            Categoria: {p['categoria']}<br>
-            Restantes: {p['quantidade']}<br>
-            Escolhido: {usados}x
-        </div>
-        """, unsafe_allow_html=True)
+    # ==================================================
+    # ITENS POR CATEGORIA (EXPANDER)
+    # ==================================================
+    for categoria in sorted(presentes_col.distinct("categoria")):
 
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🗑 Excluir", key=f"delp_{p['_id']}"):
-                if usados > 0:
-                    st.warning("Não pode excluir item já escolhido")
-                else:
-                    presentes_col.delete_one({"_id": p["_id"]})
-                    st.rerun()
+        if filtro_categoria != "Todas" and categoria != filtro_categoria:
+            continue
+
+        with st.expander(f"📦 {categoria}", expanded=False):
+
+            for item in presentes_col.find({"categoria": categoria}):
+
+                escolhidos = escolhas_col.count_documents(
+                    {"presente_id": item["_id"]}
+                )
+
+                if filtro_status == "Sem escolha" and escolhidos > 0:
+                    continue
+                if filtro_status == "Com escolha" and escolhidos == 0:
+                    continue
+                if not (filtro_qtd[0] <= item["quantidade"] <= filtro_qtd[1]):
+                    continue
+
+                st.markdown(f"""
+                <div class="card">
+                    <strong>{item['nome']}</strong><br>
+                    Restantes: {item['quantidade']}<br>
+                    Escolhido: {escolhidos}x
+                </div>
+                """, unsafe_allow_html=True)
+
+                # MODAL — QUEM ESCOLHEU ESSE ITEM
+                if st.button("👥 Ver convidados", key=f"item_{item['_id']}"):
+                    with st.dialog(f"🎁 {item['nome']}"):
+                        regs = escolhas_col.find(
+                            {"presente_id": item["_id"]}
+                        )
+
+                        if regs.count() == 0:
+                            st.info("Nenhum convidado escolheu este item")
+                        else:
+                            for r in regs:
+                                st.markdown(
+                                    f"• **{r['nome']}** — {r.get('telefone','-')}"
+                                )
+
+    st.divider()
+
+    # ==================================================
+    # CONVIDADOS — DRILL DOWN
+    # ==================================================
+    st.subheader("👥 Convidados")
+
+    convidados_lista = sorted(
+        escolhas_col.distinct("user_id")
+    )
+
+    convidado_sel = st.selectbox(
+        "Selecione um convidado",
+        ["Selecione"] + convidados_lista
+    )
+
+    if convidado_sel != "Selecione":
+        registros = list(
+            escolhas_col.find({"user_id": convidado_sel})
+        )
+
+        with st.dialog("🎁 Escolhas do convidado"):
+            st.markdown(f"**Convidado:** {registros[0]['nome']}")
+            st.markdown(f"📞 {registros[0].get('telefone','-')}")
+
+            st.divider()
+
+            for r in registros:
+                p = presentes_col.find_one({"_id": r["presente_id"]})
+                st.markdown(f"• {p['nome']}")
 
     st.stop()
 
