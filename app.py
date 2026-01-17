@@ -190,45 +190,71 @@ if not st.session_state.user_id:
 # ======================================================
 # CONVIDADO
 # ======================================================
-busca = st.text_input("🔍 Buscar presente")
+tab_escolher, tab_meus = st.tabs(["🎁 Escolher presentes", "📋 Meus presentes"])
 
-escolhidos = list(escolhas_col.find({"user_id": st.session_state.user_id}))
-ids = [e["presente_id"] for e in escolhidos]
+# ---------------- ESCOLHER PRESENTES ----------------
+with tab_escolher:
+    busca = st.text_input("🔍 Buscar presente")
 
-grupos = defaultdict(list)
-for p in presentes_col.find():
-    grupos[p["categoria"] or "Sem categoria"].append(p)
+    escolhidos = list(escolhas_col.find({"user_id": st.session_state.user_id}))
+    ids = [e["presente_id"] for e in escolhidos]
 
-for categoria, itens in sorted(grupos.items()):
-    with st.expander(f"📂 {categoria}", expanded=True):
+    grupos = defaultdict(list)
+    for p in presentes_col.find():
+        grupos[p["categoria"] or "Sem categoria"].append(p)
 
-        for item in itens:
-            if busca.lower() not in item["nome"].lower():
+    for categoria, itens in sorted(grupos.items()):
+        with st.expander(f"📂 {categoria}", expanded=True):
+
+            for item in itens:
+                if busca.lower() not in item["nome"].lower():
+                    continue
+
+                ja = item["_id"] in ids
+                st.markdown(
+                    f"**🎁 {item['nome']}** — {item['quantidade']} disponíveis"
+                    + (" ✅ escolhido" if ja else "")
+                )
+
+                if not ja and item["quantidade"] > 0:
+                    if st.button("Escolher", key=f"user_choose_{item['_id']}"):
+                        try:
+                            res = presentes_col.update_one(
+                                {"_id": item["_id"], "quantidade": {"$gt": 0}},
+                                {"$inc": {"quantidade": -1}}
+                            )
+                            if res.modified_count == 0:
+                                st.warning("Esse presente acabou agora 😢")
+                                st.rerun()
+
+                            escolhas_col.insert_one({
+                                "user_id": st.session_state.user_id,
+                                "nome": st.session_state.nome,
+                                "presente_id": item["_id"],
+                                "data": datetime.utcnow()
+                            })
+                            st.rerun()
+                        except errors.DuplicateKeyError:
+                            st.warning("Você já escolheu esse presente")
+
+# ---------------- MEUS PRESENTES ----------------
+with tab_meus:
+    minhas_escolhas = list(escolhas_col.find({"user_id": st.session_state.user_id}))
+
+    if not minhas_escolhas:
+        st.info("Você ainda não escolheu nenhum presente 🎁")
+    else:
+        for r in minhas_escolhas:
+            p = presentes_col.find_one({"_id": r["presente_id"]})
+            if not p:
                 continue
 
-            ja = item["_id"] in ids
-            st.markdown(
-                f"**🎁 {item['nome']}** — {item['quantidade']} disponíveis"
-                + (" ✅ escolhido" if ja else "")
-            )
-
-            if not ja and item["quantidade"] > 0:
-                if st.button("Escolher", key=f"user_choose_{item['_id']}"):
-                    try:
-                        res = presentes_col.update_one(
-                            {"_id": item["_id"], "quantidade": {"$gt": 0}},
-                            {"$inc": {"quantidade": -1}}
-                        )
-                        if res.modified_count == 0:
-                            st.warning("Esse presente acabou agora 😢")
-                            st.rerun()
-
-                        escolhas_col.insert_one({
-                            "user_id": st.session_state.user_id,
-                            "nome": st.session_state.nome,
-                            "presente_id": item["_id"],
-                            "data": datetime.utcnow()
-                        })
-                        st.rerun()
-                    except errors.DuplicateKeyError:
-                        st.warning("Você já escolheu esse presente")
+            c1, c2 = st.columns([4, 1])
+            c1.write(f"🎁 {p['nome']}")
+            if c2.button("❌", key=f"user_remove_{r['_id']}"):
+                escolhas_col.delete_one({"_id": r["_id"]})
+                presentes_col.update_one(
+                    {"_id": p["_id"]},
+                    {"$inc": {"quantidade": 1}}
+                )
+                st.rerun()
