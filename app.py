@@ -1,5 +1,5 @@
 import streamlit as st
-from pymongo import MongoClient
+from pymongo import MongoClient, errors
 from datetime import datetime
 import unicodedata, re, os
 from dotenv import load_dotenv
@@ -22,44 +22,15 @@ st.set_page_config(
 def normalizar(texto):
     texto = unicodedata.normalize("NFD", texto)
     texto = texto.encode("ascii", "ignore").decode("utf-8")
-    texto = re.sub(r"[^a-zA-Z0-9 ]", "", texto)
+    texto = re.sub(r"[^a-zA-Z ]", "", texto)
     return texto.lower().strip()
 
+def nome_valido(nome):
+    partes = nome.strip().split()
+    return len(partes) >= 2 and all(len(p) >= 2 for p in partes)
+
 def gerar_user_id(nome):
-    return f"nome_{normalizar(nome).replace(' ', '')}"
-
-# ======================================================
-# CSS
-# ======================================================
-st.markdown("""
-<style>
-:root { --marsala:#7A263A; }
-
-.card {
-    padding:16px;
-    border-radius:16px;
-    background:rgba(255,255,255,.96);
-    box-shadow:0 6px 16px rgba(0,0,0,.12);
-    margin-bottom:14px;
-}
-
-@media (prefers-color-scheme: dark){
-    .card{background:#1f1f1f;color:#f2f2f2;}
-}
-
-.card.ja { border:2px solid var(--marsala); }
-
-.badge {
-    background:var(--marsala);
-    color:white;
-    padding:4px 10px;
-    border-radius:14px;
-    font-size:12px;
-    display:inline-block;
-    margin-top:6px;
-}
-</style>
-""", unsafe_allow_html=True)
+    return f"user_{normalizar(nome).replace(' ', '_')}"
 
 # ======================================================
 # DATABASE
@@ -69,14 +40,24 @@ db = client["cha_panela"]
 presentes_col = db["presentes"]
 escolhas_col = db["escolhas"]
 
+# Índice de unicidade (concorrência)
+try:
+    escolhas_col.create_index(
+        [("user_id", 1), ("presente_id", 1)],
+        unique=True
+    )
+except:
+    pass
+
 # ======================================================
-# SESSION
+# SESSION STATE
 # ======================================================
 for k in [
-    "user_id","nome","telefone","admin",
-    "edit_item","view_item","view_guest"
+    "admin", "user_id", "nome",
+    "edit_item", "view_item"
 ]:
-    st.session_state.setdefault(k, None)
+    if k not in st.session_state:
+        st.session_state[k] = None if k != "admin" else False
 
 # ======================================================
 # SIDEBAR
@@ -102,137 +83,120 @@ if modo == "🔐 Admin":
         st.stop()
 
     st.title("📊 Painel Administrativo")
-
-    tabs = st.tabs(["📦 Presentes", "👥 Convidados"])
+    tab_p, tab_u = st.tabs(["📦 Presentes", "👥 Convidados"])
 
     # ==================================================
-    # TAB PRESENTES
+    # PRESENTES
     # ==================================================
-    with tabs[0]:
+    with tab_p:
 
-        st.subheader("➕ Novo presente")
-        with st.form("novo_item"):
+        st.subheader("➕ Novo Presente")
+        with st.form("novo_presente"):
             nome = st.text_input("Nome")
             categoria = st.text_input("Categoria")
-            qtd = st.number_input("Quantidade", 0, 10, 1)
-            image_url = st.text_input("URL da imagem (opcional)")
+            qtd = st.number_input("Quantidade", 1, 100, 1)
             if st.form_submit_button("Salvar"):
-                presentes_col.insert_one({
-                    "nome": nome,
-                    "categoria": categoria,
-                    "quantidade": qtd,
-                    "image_url": image_url or None
-                })
-                st.success("Presente criado")
-                st.rerun()
+                if nome.strip():
+                    presentes_col.insert_one({
+                        "nome": nome.strip(),
+                        "categoria": categoria.strip(),
+                        "quantidade": qtd
+                    })
+                    st.success("Presente criado")
+                    st.rerun()
+                else:
+                    st.error("Nome obrigatório")
 
         st.divider()
 
-        filtro = st.selectbox("Filtro", ["Todos", "Somente esgotados (0)"])
+        busca = st.text_input("🔍 Buscar presente")
 
         for item in presentes_col.find().sort("categoria"):
-            if filtro == "Somente esgotados (0)" and item["quantidade"] > 0:
+            if busca.lower() not in item["nome"].lower():
                 continue
 
             escolhidos = escolhas_col.count_documents({"presente_id": item["_id"]})
 
-            st.markdown("<div class='card'>", unsafe_allow_html=True)
-            st.markdown(f"""
-            **{item['nome']}**  
-            Categoria: {item['categoria']}  
-            Quantidade: {item['quantidade']}  
-            Escolhido: {escolhidos}x
-            """)
+            st.markdown("---")
+            st.markdown(f"### 🎁 {item['nome']}")
+            st.write(f"Categoria: {item['categoria']}")
+            st.write(f"Disponíveis: {item['quantidade']}")
+            st.write(f"Escolhido: {escolhidos}x")
 
             c1, c2, c3 = st.columns(3)
 
-            if c1.button("👥 Ver convidados", key=f"v{item['_id']}"):
+            if c1.button("👥 Convidados", key=f"v{item['_id']}"):
                 st.session_state.view_item = item["_id"]
+                st.session_state.edit_item = None
+                st.rerun()
 
             if c2.button("✏️ Editar", key=f"e{item['_id']}"):
                 st.session_state.edit_item = item["_id"]
-
-            if c3.button("🗑️ Excluir", key=f"d{item['_id']}"):
-                presentes_col.delete_one({"_id": item["_id"]})
-                escolhas_col.delete_many({"presente_id": item["_id"]})
-                st.rerun()
-
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        # -------- EDITAR ITEM --------
-        if st.session_state.edit_item:
-            item = presentes_col.find_one({"_id": st.session_state.edit_item})
-            st.subheader(f"✏️ Editando: {item['nome']}")
-
-            novo_nome = st.text_input("Nome", item["nome"])
-            nova_qtd = st.number_input("Quantidade", 0, 10, item["quantidade"])
-            nova_img = st.text_input("URL da imagem", item.get("image_url") or "")
-
-            if st.button("💾 Salvar alterações"):
-                presentes_col.update_one(
-                    {"_id": item["_id"]},
-                    {"$set":{
-                        "nome": novo_nome,
-                        "quantidade": nova_qtd,
-                        "image_url": nova_img or None
-                    }}
-                )
-                st.session_state.edit_item = None
-                st.success("Atualizado")
-                st.rerun()
-
-        # -------- CONVIDADOS DO ITEM --------
-        if st.session_state.view_item:
-            item = presentes_col.find_one({"_id": st.session_state.view_item})
-            st.subheader(f"👥 Convidados – {item['nome']}")
-
-            regs = list(escolhas_col.find({"presente_id": item["_id"]}))
-            if not regs:
-                st.info("Nenhum convidado escolheu")
-            else:
-                for r in regs:
-                    col1, col2 = st.columns([4,1])
-                    col1.write(r["nome"])
-                    if col2.button("❌", key=str(r["_id"])):
-                        escolhas_col.delete_one({"_id": r["_id"]})
-                        presentes_col.update_one(
-                            {"_id": item["_id"]},
-                            {"$inc":{"quantidade":1}}
-                        )
-                        st.rerun()
-
-            if st.button("Fechar"):
                 st.session_state.view_item = None
                 st.rerun()
 
-    # ==================================================
-    # TAB CONVIDADOS
-    # ==================================================
-    with tabs[1]:
-        for uid in escolhas_col.distinct("user_id"):
-            regs = list(escolhas_col.find({"user_id": uid}))
-            if st.button(regs[0]["nome"], key=uid):
-                st.session_state.view_guest = uid
+            if c3.button("🗑️ Excluir", key=f"d{item['_id']}"):
+                for r in escolhas_col.find({"presente_id": item["_id"]}):
+                    pass
+                escolhas_col.delete_many({"presente_id": item["_id"]})
+                presentes_col.delete_one({"_id": item["_id"]})
+                st.rerun()
 
-        if st.session_state.view_guest:
-            regs = list(escolhas_col.find({"user_id": st.session_state.view_guest}))
-            st.subheader(f"🎁 Presentes de {regs[0]['nome']}")
+        # -------- EDITAR ITEM
+        if st.session_state.edit_item:
+            item = presentes_col.find_one({"_id": st.session_state.edit_item})
+            st.divider()
+            with st.form("editar"):
+                n = st.text_input("Nome", item["nome"])
+                q = st.number_input("Quantidade", 0, 100, item["quantidade"])
+                if st.form_submit_button("Salvar"):
+                    presentes_col.update_one(
+                        {"_id": item["_id"]},
+                        {"$set": {"nome": n, "quantidade": q}}
+                    )
+                    st.session_state.edit_item = None
+                    st.success("Atualizado")
+                    st.rerun()
 
-            for r in regs:
-                p = presentes_col.find_one({"_id": r["presente_id"]})
-                col1, col2 = st.columns([4,1])
-                col1.write(p["nome"])
-                if col2.button("❌", key=str(r["_id"])):
+        # -------- CONVIDADOS DO ITEM
+        if st.session_state.view_item:
+            item = presentes_col.find_one({"_id": st.session_state.view_item})
+            st.divider()
+            st.subheader(f"👥 Convidados – {item['nome']}")
+
+            for r in escolhas_col.find({"presente_id": item["_id"]}):
+                c1, c2 = st.columns([4,1])
+                c1.write(r["nome"])
+                if c2.button("❌", key=str(r["_id"])):
                     escolhas_col.delete_one({"_id": r["_id"]})
                     presentes_col.update_one(
-                        {"_id": p["_id"]},
-                        {"$inc":{"quantidade":1}}
+                        {"_id": item["_id"]},
+                        {"$inc": {"quantidade": 1}}
                     )
                     st.rerun()
 
-            if st.button("Fechar"):
-                st.session_state.view_guest = None
-                st.rerun()
+    # ==================================================
+    # CONVIDADOS
+    # ==================================================
+    with tab_u:
+        for uid in escolhas_col.distinct("user_id"):
+            regs = list(escolhas_col.find({"user_id": uid}))
+            if not regs:
+                continue
+
+            with st.expander(regs[0]["nome"]):
+                if st.button("🗑️ Excluir convidado", key=f"del{uid}"):
+                    for r in regs:
+                        presentes_col.update_one(
+                            {"_id": r["presente_id"]},
+                            {"$inc": {"quantidade": 1}}
+                        )
+                    escolhas_col.delete_many({"user_id": uid})
+                    st.rerun()
+
+                for r in regs:
+                    p = presentes_col.find_one({"_id": r["presente_id"]})
+                    st.write(f"🎁 {p['nome']}")
 
     st.stop()
 
@@ -242,60 +206,67 @@ if modo == "🔐 Admin":
 if not st.session_state.user_id:
     st.title("🎁 Chá de Panela")
     nome = st.text_input("Nome e sobrenome")
-    telefone = st.text_input("Telefone (opcional)")
 
     if st.button("Continuar"):
-        st.session_state.nome = nome
-        st.session_state.telefone = telefone
-        st.session_state.user_id = gerar_user_id(nome)
-        st.rerun()
+        if not nome_valido(nome):
+            st.error("Informe nome e sobrenome válidos")
+        else:
+            st.session_state.nome = nome.strip()
+            st.session_state.user_id = gerar_user_id(nome)
+            st.rerun()
     st.stop()
 
 # ======================================================
-# UX CONVIDADO
+# CONVIDADO
 # ======================================================
 tabs = st.tabs(["🎁 Escolher presentes", "📋 Meus presentes"])
 
 with tabs[0]:
-    busca = st.text_input("🔍 Buscar")
-    categoria = st.selectbox("Categoria", ["Todas"] + sorted(presentes_col.distinct("categoria")))
-
     escolhas = list(escolhas_col.find({"user_id": st.session_state.user_id}))
     ids = [e["presente_id"] for e in escolhas]
 
     for item in presentes_col.find():
-        if categoria != "Todas" and item["categoria"] != categoria:
-            continue
-        if busca.lower() not in item["nome"].lower():
-            continue
+        st.write(f"🎁 **{item['nome']}** — {item['quantidade']} disponíveis")
 
-        ja = item["_id"] in ids
+        if item["_id"] not in ids and item["quantidade"] > 0:
+            if st.button("Escolher", key=str(item["_id"])):
+                try:
+                    res = presentes_col.update_one(
+                        {"_id": item["_id"], "quantidade": {"$gt": 0}},
+                        {"$inc": {"quantidade": -1}}
+                    )
 
-        st.markdown(f"""
-        <div class="card {'ja' if ja else ''}">
-        <strong>{item['nome']}</strong><br>
-        {item['quantidade']} disponíveis
-        </div>
-        """, unsafe_allow_html=True)
+                    if res.modified_count == 0:
+                        st.warning("Esse presente acabou agora 😢")
+                        st.rerun()
 
-        if not ja and item["quantidade"] > 0:
-            if st.button("🎁 Escolher", key=str(item["_id"])):
-                presentes_col.update_one({"_id": item["_id"]},{"$inc":{"quantidade":-1}})
-                escolhas_col.insert_one({
-                    "user_id": st.session_state.user_id,
-                    "nome": st.session_state.nome,
-                    "telefone": st.session_state.telefone,
-                    "presente_id": item["_id"],
-                    "data": datetime.utcnow()
-                })
-                st.rerun()
+                    escolhas_col.insert_one({
+                        "user_id": st.session_state.user_id,
+                        "nome": st.session_state.nome,
+                        "presente_id": item["_id"],
+                        "data": datetime.utcnow()
+                    })
+                    st.success("Presente reservado 🎁")
+                    st.rerun()
+
+                except errors.DuplicateKeyError:
+                    st.warning("Você já escolheu esse presente")
+                except Exception:
+                    presentes_col.update_one(
+                        {"_id": item["_id"]},
+                        {"$inc": {"quantidade": 1}}
+                    )
+                    st.error("Erro inesperado. Tente novamente.")
 
 with tabs[1]:
     for r in escolhas:
         p = presentes_col.find_one({"_id": r["presente_id"]})
-        col1, col2 = st.columns([4,1])
-        col1.write(p["nome"])
-        if col2.button("❌ Remover", key=str(r["_id"])):
+        c1, c2 = st.columns([4,1])
+        c1.write(p["nome"])
+        if c2.button("❌ Remover", key=str(r["_id"])):
             escolhas_col.delete_one({"_id": r["_id"]})
-            presentes_col.update_one({"_id": p["_id"]},{"$inc":{"quantidade":1}})
+            presentes_col.update_one(
+                {"_id": p["_id"]},
+                {"$inc": {"quantidade": 1}}
+            )
             st.rerun()
