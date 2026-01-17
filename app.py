@@ -9,12 +9,7 @@ from bson import ObjectId
 # INIT
 # ======================================================
 load_dotenv()
-
-st.set_page_config(
-    page_title="Chá de Panela",
-    page_icon="🎁",
-    layout="wide"
-)
+st.set_page_config(page_title="Chá de Panela", page_icon="🎁", layout="wide")
 
 # ======================================================
 # FUNÇÕES
@@ -33,31 +28,31 @@ def gerar_user_id(nome):
     return f"user_{normalizar(nome).replace(' ', '_')}"
 
 # ======================================================
-# DATABASE
+# DB
 # ======================================================
 client = MongoClient(os.getenv("MONGO_URL"))
 db = client["cha_panela"]
 presentes_col = db["presentes"]
 escolhas_col = db["escolhas"]
 
-# Índice de unicidade (concorrência)
-try:
-    escolhas_col.create_index(
-        [("user_id", 1), ("presente_id", 1)],
-        unique=True
-    )
-except:
-    pass
+# índice concorrência
+escolhas_col.create_index(
+    [("user_id", 1), ("presente_id", 1)],
+    unique=True
+)
 
 # ======================================================
-# SESSION STATE
+# SESSION
 # ======================================================
-for k in [
-    "admin", "user_id", "nome",
-    "edit_item", "view_item"
-]:
+for k, v in {
+    "admin": False,
+    "user_id": None,
+    "nome": None,
+    "edit_item": None,
+    "view_item": None
+}.items():
     if k not in st.session_state:
-        st.session_state[k] = None if k != "admin" else False
+        st.session_state[k] = v
 
 # ======================================================
 # SIDEBAR
@@ -73,7 +68,6 @@ if modo == "🔐 Admin":
         st.title("🔐 Login Admin")
         u = st.text_input("Usuário")
         s = st.text_input("Senha", type="password")
-
         if st.button("Entrar"):
             if u == os.getenv("ADMIN_USER") and s == os.getenv("ADMIN_PASSWORD"):
                 st.session_state.admin = True
@@ -85,64 +79,61 @@ if modo == "🔐 Admin":
     st.title("📊 Painel Administrativo")
     tab_p, tab_u = st.tabs(["📦 Presentes", "👥 Convidados"])
 
-    # ==================================================
-    # PRESENTES
-    # ==================================================
+    # ================= PRESENTES =================
     with tab_p:
-
-        st.subheader("➕ Novo Presente")
-        with st.form("novo_presente"):
+        st.subheader("➕ Novo presente")
+        with st.form("novo"):
             nome = st.text_input("Nome")
             categoria = st.text_input("Categoria")
             qtd = st.number_input("Quantidade", 1, 100, 1)
             if st.form_submit_button("Salvar"):
-                if nome.strip():
+                if nome:
                     presentes_col.insert_one({
                         "nome": nome.strip(),
                         "categoria": categoria.strip(),
                         "quantidade": qtd
                     })
-                    st.success("Presente criado")
                     st.rerun()
-                else:
-                    st.error("Nome obrigatório")
 
         st.divider()
 
-        busca = st.text_input("🔍 Buscar presente")
+        col1, col2 = st.columns(2)
+        busca = col1.text_input("🔍 Buscar")
+        filtro = col2.selectbox(
+            "Filtro",
+            ["Todos", "Escolhidos", "Não escolhidos", "Esgotados"]
+        )
 
         for item in presentes_col.find().sort("categoria"):
-            if busca.lower() not in item["nome"].lower():
-                continue
-
             escolhidos = escolhas_col.count_documents({"presente_id": item["_id"]})
 
-            st.markdown("---")
+            if busca.lower() not in item["nome"].lower():
+                continue
+            if filtro == "Escolhidos" and escolhidos == 0:
+                continue
+            if filtro == "Não escolhidos" and escolhidos > 0:
+                continue
+            if filtro == "Esgotados" and item["quantidade"] > 0:
+                continue
+
             st.markdown(f"### 🎁 {item['nome']}")
             st.write(f"Categoria: {item['categoria']}")
-            st.write(f"Disponíveis: {item['quantidade']}")
-            st.write(f"Escolhido: {escolhidos}x")
+            st.write(f"Disponíveis: {item['quantidade']} | Escolhido: {escolhidos}")
 
             c1, c2, c3 = st.columns(3)
-
             if c1.button("👥 Convidados", key=f"v{item['_id']}"):
                 st.session_state.view_item = item["_id"]
                 st.session_state.edit_item = None
                 st.rerun()
-
             if c2.button("✏️ Editar", key=f"e{item['_id']}"):
                 st.session_state.edit_item = item["_id"]
                 st.session_state.view_item = None
                 st.rerun()
-
             if c3.button("🗑️ Excluir", key=f"d{item['_id']}"):
-                for r in escolhas_col.find({"presente_id": item["_id"]}):
-                    pass
                 escolhas_col.delete_many({"presente_id": item["_id"]})
                 presentes_col.delete_one({"_id": item["_id"]})
                 st.rerun()
 
-        # -------- EDITAR ITEM
         if st.session_state.edit_item:
             item = presentes_col.find_one({"_id": st.session_state.edit_item})
             st.divider()
@@ -155,15 +146,11 @@ if modo == "🔐 Admin":
                         {"$set": {"nome": n, "quantidade": q}}
                     )
                     st.session_state.edit_item = None
-                    st.success("Atualizado")
                     st.rerun()
 
-        # -------- CONVIDADOS DO ITEM
         if st.session_state.view_item:
             item = presentes_col.find_one({"_id": st.session_state.view_item})
             st.divider()
-            st.subheader(f"👥 Convidados – {item['nome']}")
-
             for r in escolhas_col.find({"presente_id": item["_id"]}):
                 c1, c2 = st.columns([4,1])
                 c1.write(r["nome"])
@@ -175,15 +162,12 @@ if modo == "🔐 Admin":
                     )
                     st.rerun()
 
-    # ==================================================
-    # CONVIDADOS
-    # ==================================================
+    # ================= CONVIDADOS =================
     with tab_u:
         for uid in escolhas_col.distinct("user_id"):
             regs = list(escolhas_col.find({"user_id": uid}))
             if not regs:
                 continue
-
             with st.expander(regs[0]["nome"]):
                 if st.button("🗑️ Excluir convidado", key=f"del{uid}"):
                     for r in regs:
@@ -193,10 +177,17 @@ if modo == "🔐 Admin":
                         )
                     escolhas_col.delete_many({"user_id": uid})
                     st.rerun()
-
                 for r in regs:
                     p = presentes_col.find_one({"_id": r["presente_id"]})
-                    st.write(f"🎁 {p['nome']}")
+                    c1, c2 = st.columns([4,1])
+                    c1.write(p["nome"])
+                    if c2.button("❌", key=str(r["_id"])):
+                        escolhas_col.delete_one({"_id": r["_id"]})
+                        presentes_col.update_one(
+                            {"_id": p["_id"]},
+                            {"$inc": {"quantidade": 1}}
+                        )
+                        st.rerun()
 
     st.stop()
 
@@ -206,14 +197,13 @@ if modo == "🔐 Admin":
 if not st.session_state.user_id:
     st.title("🎁 Chá de Panela")
     nome = st.text_input("Nome e sobrenome")
-
     if st.button("Continuar"):
-        if not nome_valido(nome):
-            st.error("Informe nome e sobrenome válidos")
-        else:
+        if nome_valido(nome):
             st.session_state.nome = nome.strip()
             st.session_state.user_id = gerar_user_id(nome)
             st.rerun()
+        else:
+            st.error("Informe nome e sobrenome válidos")
     st.stop()
 
 # ======================================================
@@ -222,22 +212,31 @@ if not st.session_state.user_id:
 tabs = st.tabs(["🎁 Escolher presentes", "📋 Meus presentes"])
 
 with tabs[0]:
+    busca = st.text_input("🔍 Buscar presente")
+    categorias = ["Todas"] + sorted(presentes_col.distinct("categoria"))
+    categoria = st.selectbox("Categoria", categorias)
+
     escolhas = list(escolhas_col.find({"user_id": st.session_state.user_id}))
     ids = [e["presente_id"] for e in escolhas]
 
-    for item in presentes_col.find():
-        st.write(f"🎁 **{item['nome']}** — {item['quantidade']} disponíveis")
+    for item in presentes_col.find().sort("categoria"):
+        if categoria != "Todas" and item["categoria"] != categoria:
+            continue
+        if busca.lower() not in item["nome"].lower():
+            continue
 
-        if item["_id"] not in ids and item["quantidade"] > 0:
+        ja = item["_id"] in ids
+        st.markdown(f"**🎁 {item['nome']}** ({item['categoria']}) — {item['quantidade']} disponíveis")
+
+        if not ja and item["quantidade"] > 0:
             if st.button("Escolher", key=str(item["_id"])):
                 try:
                     res = presentes_col.update_one(
                         {"_id": item["_id"], "quantidade": {"$gt": 0}},
                         {"$inc": {"quantidade": -1}}
                     )
-
                     if res.modified_count == 0:
-                        st.warning("Esse presente acabou agora 😢")
+                        st.warning("Acabou agora 😢")
                         st.rerun()
 
                     escolhas_col.insert_one({
@@ -246,17 +245,9 @@ with tabs[0]:
                         "presente_id": item["_id"],
                         "data": datetime.utcnow()
                     })
-                    st.success("Presente reservado 🎁")
                     st.rerun()
-
                 except errors.DuplicateKeyError:
-                    st.warning("Você já escolheu esse presente")
-                except Exception:
-                    presentes_col.update_one(
-                        {"_id": item["_id"]},
-                        {"$inc": {"quantidade": 1}}
-                    )
-                    st.error("Erro inesperado. Tente novamente.")
+                    st.warning("Você já escolheu este presente")
 
 with tabs[1]:
     for r in escolhas:
