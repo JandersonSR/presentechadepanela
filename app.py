@@ -27,6 +27,14 @@ def nome_valido(nome):
 def gerar_user_id(nome):
     return f"user_{normalizar(nome).replace(' ', '_')}"
 
+def usuario_logado():
+    return (
+        "user_id" in st.session_state
+        and st.session_state.user_id is not None
+        and "nome" in st.session_state
+        and st.session_state.nome is not None
+    )
+
 # ======================================================
 # DATABASE
 # ======================================================
@@ -234,7 +242,7 @@ if modo == "🔐 Admin":
 # ======================================================
 # LOGIN CONVIDADO
 # ======================================================
-if not st.session_state.user_id:
+if not usuario_logado():
     st.title("🎁 Chá de Panela")
     nome = st.text_input("Nome e sobrenome")
     if st.button("Continuar"):
@@ -247,8 +255,14 @@ if not st.session_state.user_id:
     st.stop()
 
 # ======================================================
-# CONVIDADO
+# PROTEÇÃO DO BLOCO CONVIDADO
 # ======================================================
+if not usuario_logado():
+    st.stop()
+
+# ======================================================
+# CONVIDADO
+# ======================================================    
 tab_escolher, tab_meus = st.tabs(
     ["🎁 Escolher presentes", "📋 Meus presentes"]
 )
@@ -279,6 +293,11 @@ with tab_escolher:
 
                 if not ja and item["quantidade"] > 0:
                     if st.button("Escolher", key=f"user_choose_{item['_id']}"):
+                        if not usuario_logado():
+                            st.warning("Sessão expirada, faça login novamente")
+                            st.session_state.user_id = None
+                            st.session_state.nome = None
+                            st.rerun()
                         try:
                             res = presentes_col.update_one(
                                 {
